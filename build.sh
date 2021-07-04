@@ -1,0 +1,1 @@
+gcc -O3 -g -march=native -fwrapv -flto -Wall habane_cli.c habane_decode.c habane_encode.c fft-complex.c -o habane.exe
