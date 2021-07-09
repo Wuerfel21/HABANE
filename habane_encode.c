@@ -127,17 +127,17 @@ void habane_encode_block(struct habane_block *block,
         Fft_transform(fftbuf_l,HABANE_FFTSIZE,false);
         Fft_transform(fftbuf_r,HABANE_FFTSIZE,false);
 
-        double binbuffer_l[HABANE_FFTSIZE/2],binbuffer_r[HABANE_FFTSIZE/2];
+        double binbuffer_l[HABANE_FFTSIZE/4],binbuffer_r[HABANE_FFTSIZE/4];
         //double noiseacc_l=0,noiseacc_r=0;
-        for (int i=0;i<HABANE_FFTSIZE/2;i++) {
-            binbuffer_l[i] = fabs(creal(fftbuf_l[i+(HABANE_FFTSIZE/2)]) * noiseweight[i+(HABANE_FFTSIZE/2)]);
-            binbuffer_r[i] = fabs(creal(fftbuf_r[i+(HABANE_FFTSIZE/2)]) * noiseweight[i+(HABANE_FFTSIZE/2)]);
+        for (int i=0;i<HABANE_FFTSIZE/4;i++) {
+            binbuffer_l[i] = cabs(fftbuf_l[i+(HABANE_FFTSIZE/4)]) * noiseweight[i+(HABANE_FFTSIZE/4)];
+            binbuffer_r[i] = cabs(fftbuf_r[i+(HABANE_FFTSIZE/4)]) * noiseweight[i+(HABANE_FFTSIZE/4)];
         }
-        qsort(binbuffer_l,HABANE_FFTSIZE/2,sizeof(double),&double_compare);
-        qsort(binbuffer_r,HABANE_FFTSIZE/2,sizeof(double),&double_compare);
+        qsort(binbuffer_l,HABANE_FFTSIZE/4,sizeof(double),&double_compare);
+        qsort(binbuffer_r,HABANE_FFTSIZE/4,sizeof(double),&double_compare);
 
-        uint noiselev_l = h_clamp(round(16-log2f(0.00001f+powf(binbuffer_l[HABANE_FFTSIZE/4],1.0f))),0,15);
-        uint noiselev_r = h_clamp(round(16-log2f(0.00001f+powf(binbuffer_r[HABANE_FFTSIZE/4],1.0f))),0,15);
+        uint noiselev_l = h_clamp(round(16-log2f(0.00001f+powf(binbuffer_l[HABANE_FFTSIZE/8],1.0f))),0,15);
+        uint noiselev_r = h_clamp(round(16-log2f(0.00001f+powf(binbuffer_r[HABANE_FFTSIZE/8],1.0f))),0,15);
 
         //uint noiselev_l = h_clamp(round(16-log2f(0.00001f+powf(noiseacc_l/HABANE_FFTSIZE,1.4f))),0,15);
         //uint noiselev_r = h_clamp(round(16-log2f(0.00001f+powf(noiseacc_r/HABANE_FFTSIZE,1.4f))),0,15);
@@ -192,9 +192,9 @@ static double noisesens(double f) {
 }
 
 double* habane_make_noiseweight(double f) {
-    double *buffer = calloc(HABANE_FFTSIZE,sizeof(double));
-    for (int i=0;i<HABANE_FFTSIZE;i++) {
-        double f = (i+0.5) * ((float)HABANE_RATE/HABANE_FFTSIZE);
+    double *buffer = calloc(HABANE_FFTSIZE/2,sizeof(double));
+    for (int i=0;i<HABANE_FFTSIZE/2;i++) {
+        double f = (i*2.0+0.5) * ((float)HABANE_RATE/HABANE_FFTSIZE);
         buffer[i] = noisesens(f);
     }
     return buffer;
