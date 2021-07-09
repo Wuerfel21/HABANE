@@ -5,8 +5,8 @@
 #include "fft-complex.h"
 
 inline int32_t round_sar(int32_t val,uint sar) {
-    //return val/(1<<sar);
-    return val>>sar;
+    return val/(1<<sar);
+    //return val>>sar;
 }
 
 inline h_stereo_sample16 get_sample(int n, int blocksize,h_stereo_sample16 *inbuffer,h_stereo_sample16 *inbuffer_prev,h_stereo_sample16 *inbuffer_next) {
@@ -182,7 +182,7 @@ static double noisesens(double f) {
     double h2 = 1.306612257412824e-19*pow(f,5) - 2.118150887518656e-15*pow(f,3) + 5.559488023498642e-4*f;
     double fsens = (1.246332637532143e-4*f)/sqrt(h1*h1+h2*h2);
 
-    double scale = 7000;
+    double scale = 5500;
 
     // Low bins shouldn't respond very much
     double wall = fmax(0,1-pow(2,-0.001*(f-23700)));
