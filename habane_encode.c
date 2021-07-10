@@ -4,8 +4,23 @@
 #include <stdio.h>
 #include "fft-complex.h"
 
+inline int32_t divRoundClosest( int32_t A, int32_t B )
+{
+if(A<0)
+    if(B<0)
+        return (A + (-B+1)/2) / B + 1;
+    else
+        return (A + ( B+1)/2) / B - 1;
+else
+    if(B<0)
+        return (A - (-B+1)/2) / B - 1;
+    else
+        return (A - ( B+1)/2) / B + 1;
+}
+
 inline int32_t round_sar(int32_t val,uint sar) {
-    return val/(1<<sar);
+    return divRoundClosest(val,1u<<sar);
+    //return val/(1<<sar);
     //return val>>sar;
 }
 
@@ -43,11 +58,11 @@ void habane_encode_block(struct habane_block *block,
         lowbuffer[i] = os;
     }
 
-    h_stereo_sample32 history[2] = {lowbuffer[1], lowbuffer[0]};
     block->raw1l = habane_clampto16(lowbuffer[0]).l;
     block->raw1r = habane_clampto16(lowbuffer[0]).r;
     block->raw2l = habane_clampto16(lowbuffer[1]).l;
     block->raw2r = habane_clampto16(lowbuffer[1]).r;
+    h_stereo_sample32 history[2] = {{block->raw2l,block->raw2r}, {block->raw1l,block->raw1r}};
 
     for (uint ui=0;ui<HABANE_UNITS_PER_BLOCK;ui++) {
         uint unitbase = 2 + ui*HABANE_UNITLENGTH;
