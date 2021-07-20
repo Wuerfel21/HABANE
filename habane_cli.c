@@ -5,6 +5,8 @@
 
 
 static int find_best_predictor(int32_t target,int32_t h1,int32_t h2) {
+    h1 <<= 2;
+    h2 <<= 2;
     uint best_predictor = 0;
     int32_t best_diff = INT32_MAX;
     for (uint p=0;p<512;p++) {
@@ -96,21 +98,55 @@ int main(int argc,char** argv) {
             return -1;
         }
         FILE* in = fopen(argv[2],"rb");
-        h_stereo_sample16 history[2] = {{},{}};
+
+        float *sinckernel = habane_makesinc();
+        h_stereo_sample16 buffer[3][HABANE_BLOCKLENGTH*2] = {};
+        h_stereo_sample32 history[2] = {{},{}};
         uint32_t bestcount[512] = {};
         fread(&history[1],sizeof(h_stereo_sample16),1,in);
         fread(&history[0],sizeof(h_stereo_sample16),1,in);
-        for (;;) {
-            h_stereo_sample16 s;
-            if (!fread(&s,sizeof(h_stereo_sample16),1,in)) break;
-            bestcount[find_best_predictor(s.l,history[0].l,history[1].l)]++;
-            bestcount[find_best_predictor(s.r,history[0].r,history[1].r)]++;
-            history[1] = history[0];
-            history[0] = s;
+        for (int i=0;;i++) {
+            int read = fread(buffer[i%3],sizeof(h_stereo_sample16),HABANE_BLOCKLENGTH*2,in);
+            if (i>=1) {
+                h_stereo_sample32 lowbuffer[HABANE_BLOCKLENGTH];
+                habane_downsample(buffer[(i-1)%3],i>=2?buffer[(i-2)%3]:NULL,read?buffer[(i-0)%3]:NULL,HABANE_BLOCKLENGTH,lowbuffer,sinckernel);
+                for (int i=0;i<HABANE_BLOCKLENGTH;i++) {
+                    h_stereo_sample32 s = lowbuffer[i];
+                    bestcount[find_best_predictor(s.l,history[0].l,history[1].l)]++;
+                    bestcount[find_best_predictor(s.r,history[0].r,history[1].r)]++;
+                    history[1] = history[0];
+                    history[0] = s;
+                }
+            }
+            if (!read) break;
         }
+        free(sinckernel);
+        fclose(in);
+
         for (uint p=0;p<512;p++) {
             printf("%03X : %d\n",p,bestcount[p]);
         }
+    } else if (!strcmp(argv[1],"prediction_stats")) {
+        if (argc != 3) {
+            printf("Error: not enough arguments\n");
+            return -1;
+        }
+        FILE* in = fopen(argv[2],"rb");
+        uint32_t predcount[16] = {};
+        for (;;) {
+            struct habane_block block = {};
+            int read = fread(&block,sizeof(struct habane_block),1,in);
+            if (read == 0) break;
+            for (uint i=0;i<HABANE_UNITS_PER_BLOCK;i++) {
+                predcount[block.units[i].coding >> 4]++;
+            }
+        }
+        fclose(in);
+
+        for (uint i=0;i<16;i++) {
+            printf("%02d : %d\n",i,predcount[i]);
+        }
+
     } else {
         printf("Unknown command\n");
     }

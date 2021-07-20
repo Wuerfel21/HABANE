@@ -39,17 +39,32 @@ static int double_compare(const void * a, const void * b) {
     else return 0;  
 }
 
+inline uint32_t rotl(const uint32_t x, int k) {
+	return (x << k) | (x >> (32 - k));
+}
 
-void habane_encode_block(struct habane_block *block, 
+inline int32_t xoro64(uint64_t *stp) {
+    union {uint64_t s64;uint32_t s[2];} state = {*stp};
+    const uint32_t s0 = state.s[0];
+    uint32_t s1 = state.s[1];
+    const uint32_t result = rotl(s0 * 0x9E3779BB, 5) * 5;
+
+    s1 ^= s0;
+    state.s[0] = rotl(s0, 26) ^ s1 ^ (s1 << 9); // a, b
+    state.s[1] = rotl(s1, 13); // c
+    *stp = state.s64;
+
+    return result;
+}
+
+void habane_downsample(
     h_stereo_sample16 *inbuffer,h_stereo_sample16 *inbuffer_prev,h_stereo_sample16 *inbuffer_next,
-    float *sinckernel, float *fftwin, double *noiseweight) {
+    uint blocklen, h_stereo_sample32 *lowbuffer, float *sinckernel) {
 
-    // Downsample low band
-    h_stereo_sample32 lowbuffer[HABANE_BLOCKLENGTH];
-    for (int i=0;i<HABANE_BLOCKLENGTH;i++) {
+    for (int i=0;i<blocklen;i++) {
         float accu_l = 0, accu_r = 0;
         for (int n=0;n<HABANE_KERNEL_SIZE;n++) {
-            h_stereo_sample16 s = get_sample(i*2+n-(HABANE_KERNEL_SIZE/2),HABANE_BLOCKLENGTH*2,inbuffer,inbuffer_prev,inbuffer_next);
+            h_stereo_sample16 s = get_sample(i*2+n-(HABANE_KERNEL_SIZE/2),blocklen*2,inbuffer,inbuffer_prev,inbuffer_next);
             float sinc = sinckernel[n];//n==32?1.f:0.f;//sinckernel[n];
             accu_l += sinc*s.l;
             accu_r += sinc*s.r;
@@ -57,12 +72,23 @@ void habane_encode_block(struct habane_block *block,
         h_stereo_sample32 os = {roundf(accu_l),roundf(accu_r)};
         lowbuffer[i] = os;
     }
+}
+
+void habane_encode_block(struct habane_block *block, 
+    h_stereo_sample16 *inbuffer,h_stereo_sample16 *inbuffer_prev,h_stereo_sample16 *inbuffer_next,
+    float *sinckernel, float *fftwin, double *noiseweight) {
+
+    // Downsample low band
+    h_stereo_sample32 lowbuffer[HABANE_BLOCKLENGTH];
+    habane_downsample(inbuffer,inbuffer_prev,inbuffer_next,HABANE_BLOCKLENGTH,lowbuffer,sinckernel);
 
     block->raw1l = habane_clampto16(lowbuffer[0]).l;
     block->raw1r = habane_clampto16(lowbuffer[0]).r;
     block->raw2l = habane_clampto16(lowbuffer[1]).l;
     block->raw2r = habane_clampto16(lowbuffer[1]).r;
     h_stereo_sample32 history[2] = {{block->raw2l,block->raw2r}, {block->raw1l,block->raw1r}};
+    uint64_t dither_rngstate1 = lowbuffer[0].l + lowbuffer[0].r + 0x80000000; // Init state from first sample to avoid repetitive dither noise
+    uint64_t dither_rngstate2 = lowbuffer[1].l + lowbuffer[1].r + 0x8000BEEF;
 
     for (uint ui=0;ui<HABANE_UNITS_PER_BLOCK;ui++) {
         uint unitbase = 2 + ui*HABANE_UNITLENGTH;
@@ -70,9 +96,12 @@ void habane_encode_block(struct habane_block *block,
         h_stereo_sample32 new_history[256][2];
         uint8_t unitdata[256][HABANE_UNITLENGTH];
         uint64_t encoder_error[256];
+        uint64_t dither_rngstate_new1,dither_rngstate_new2;
 
         // Try encoding in all 256 possible modes
         for (uint mode=0;mode<256;mode++) {
+            dither_rngstate_new1 = dither_rngstate1;
+            dither_rngstate_new2 = dither_rngstate2;
             uint scale = mode&15, predictor = (mode >> 4)&15;
             new_history[mode][0] = history[0];
             new_history[mode][1] = history[1];
@@ -82,9 +111,16 @@ void habane_encode_block(struct habane_block *block,
                     habane_predictor_value(predictor,new_history[mode][0].l,new_history[mode][1].l),
                     habane_predictor_value(predictor,new_history[mode][0].r,new_history[mode][1].r),
                 };
-                h_stereo_sample32 insample = lowbuffer[unitbase+n];
-                int32_t diff_l = insample.l - prediction.l;
-                int32_t diff_r = insample.r - prediction.r;
+                uint dithersar = scale>=13 ? 34-((scale-13)<<2) : 34-scale;
+                int32_t dither = dithersar >= 32 ? 0 : (xoro64(&dither_rngstate_new1)>>dithersar)+(xoro64(&dither_rngstate_new2)>>dithersar);
+                h_stereo_sample32 target = { // Noise shaping
+                    lowbuffer[unitbase+n].l + (new_history[mode][0].l-lowbuffer[unitbase+n-1].l)/2 + dither,
+                    lowbuffer[unitbase+n].r + (new_history[mode][0].r-lowbuffer[unitbase+n-1].r)/2 + dither,
+                    //lowbuffer[unitbase+n].l + dither,
+                    //lowbuffer[unitbase+n].r + dither,
+                } ;
+                int32_t diff_l = target.l - prediction.l;
+                int32_t diff_r = target.r - prediction.r;
                 h_stereo_sample32 new_sample;
                 if (scale>=13) { // Joint mode
                     int32_t diff_joint = (diff_l+diff_r)>>1;
@@ -103,13 +139,15 @@ void habane_encode_block(struct habane_block *block,
                 new_history[mode][1] = new_history[mode][0];
                 new_history[mode][0] = new_sample;
 
-                int64_t error_l = (int64_t)new_sample.l - (int64_t)insample.l;
-                int64_t error_r = (int64_t)new_sample.r - (int64_t)insample.r;
+                int64_t error_l = (int64_t)new_sample.l - (int64_t)lowbuffer[unitbase+n].l;
+                int64_t error_r = (int64_t)new_sample.r - (int64_t)lowbuffer[unitbase+n].r;
                 encoder_error[mode] += (error_l*error_l);
                 encoder_error[mode] += (error_r*error_r);
-                //if (predictor!=2) encoder_error[mode] += 1000000000000U;
+                //if (predictor!=1) encoder_error[mode] += 1000000000000U;
             }
         }
+        dither_rngstate1 = dither_rngstate_new1;
+        dither_rngstate2 = dither_rngstate_new2;
 
         // Find the best one
         uint best_coding = 0;
@@ -197,7 +235,7 @@ static double noisesens(double f) {
     double h2 = 1.306612257412824e-19*pow(f,5) - 2.118150887518656e-15*pow(f,3) + 5.559488023498642e-4*f;
     double fsens = (1.246332637532143e-4*f)/sqrt(h1*h1+h2*h2);
 
-    double scale = 5500;
+    double scale = 4500;
 
     // Low bins shouldn't respond very much
     double wall = fmax(0,1-pow(2,-0.001*(f-23700)));

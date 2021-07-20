@@ -87,6 +87,8 @@ inline void setnib0(uint8_t* b,uint nib) {
 extern const struct habane_predictor habane_predictors[16];
 
 inline int32_t habane_predictor_value(uint predictor, int32_t h1, int32_t h2) {
+    h1 <<= 2;
+    h2 <<= 2;
     if (predictor&1) h2 = -h2;
     return (h1 >> habane_predictors[predictor].h1_sar) + (h2 >> habane_predictors[predictor].h2_sar);
 }
