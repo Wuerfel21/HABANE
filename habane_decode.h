@@ -6,7 +6,8 @@ struct habane_noise_state {
     uint32_t lfsr;
     int32_t filter1;
     int32_t filter2;
-    int32_t filter3_l,filter3_r;
+    int32_t filter3;
+    int32_t filter4_l,filter4_r;
 };
 
 h_stereo_sample16 habane_noise_iterate(struct habane_noise_state *state,int level_l, int level_r);

@@ -26,7 +26,7 @@ h_stereo_sample16 habane_noise_iterate(struct habane_noise_state *state,int leve
 
     state->lfsr = (state->lfsr << 1) + (__builtin_parity(state->lfsr&HABANE_LFSR_TAPS) ? 1 : 0);
 
-    int32_t lfsr_sample = ((int32_t)state->lfsr)>>19;
+    int32_t lfsr_sample = ((int32_t)state->lfsr)>>20;
     int32_t diff = lfsr_sample - state->filter1;
 
     state->filter1 += diff;
@@ -34,13 +34,16 @@ h_stereo_sample16 habane_noise_iterate(struct habane_noise_state *state,int leve
     int32_t diff2 = diff - state->filter2;
     state->filter2 += diff2;
 
-    int32_t diff3l = (diff2 >> level_l) - state->filter3_l;
-    int32_t diff3r = (diff2 >> level_r) - state->filter3_r;
+    int32_t diff3 = diff2 - state->filter3;
+    state->filter3 += diff3;
 
-    state->filter3_l += diff3l;
-    state->filter3_r += diff3r;
+    int32_t diff4l = (diff3 >> level_l) - state->filter4_l;
+    int32_t diff4r = (diff3 >> level_r) - state->filter4_r;
 
-    h_stereo_sample16 rv = {(int16_t)diff3l,(int16_t)diff3r};
+    state->filter4_l += diff4l;
+    state->filter4_r += diff4r;
+
+    h_stereo_sample16 rv = {(int16_t)diff4l,(int16_t)diff4r};
     //struct h_stereo_sample rv = {(int16_t)lfsr_sample,(int16_t)lfsr_sample};
     return rv;
 }
@@ -49,8 +52,9 @@ void habane_noise_init(struct habane_noise_state *state) {
     state->lfsr = HABANE_LFSR_INIT;
     state->filter1 = 0;
     state->filter2 = 0;
-    state->filter3_l = 0;
-    state->filter3_r = 0;
+    state->filter3 = 0;
+    state->filter4_l = 0;
+    state->filter4_r = 0;
 }
 
 void habane_noise_test(struct habane_noise_state *noise_state,int16_t *buffer,int samples) {
